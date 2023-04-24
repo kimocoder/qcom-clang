@@ -88,7 +88,7 @@ def is_active(checkers):
 
         return any(pattern.match(checker) for pattern in predicate.patterns)
 
-    predicate.patterns = [re.compile(r'^' + a + r'(\.|$)') for a in checkers]
+    predicate.patterns = [re.compile(f'^{a}' + r'(\.|$)') for a in checkers]
     return predicate
 
 
@@ -124,8 +124,7 @@ def parse_checkers(stream):
             state = line.strip()
         else:
             pattern = re.compile(r'^\s\s(?P<key>\S*)\s*(?P<value>.*)')
-            match = pattern.match(line.rstrip())
-            if match:
+            if match := pattern.match(line.rstrip()):
                 current = match.groupdict()
                 yield (current['key'], current['value'])
 
@@ -146,14 +145,13 @@ def get_checkers(clang, plugins):
 
     is_active_checker = is_active(get_active_checkers(clang, plugins))
 
-    checkers = {
+    if checkers := {
         name: (description, is_active_checker(name))
         for name, description in parse_checkers(lines)
-    }
-    if not checkers:
+    }:
+        return checkers
+    else:
         raise Exception('Could not query Clang for available checkers.')
-
-    return checkers
 
 def is_ctu_capable(clang_cmd, func_map_cmd):
     """ Detects if the current (or given) clang and function mapping
@@ -171,10 +169,7 @@ def get_triple_arch(command, cwd):
     compilation command. """
 
     cmd = get_arguments(command, cwd)
-    arch = ""
     i = 0
     while i < len(cmd) and cmd[i] != "-triple":
         i += 1
-    if i < (len(cmd) - 1):
-        arch = cmd[i + 1]
-    return arch
+    return cmd[i + 1] if i < (len(cmd) - 1) else ""

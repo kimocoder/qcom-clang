@@ -86,7 +86,7 @@ def normalize_args_for_analyze(args, from_build_command):
         args.plugins = []
 
     # make exclude directory list unique and absolute.
-    uniq_excludes = set(os.path.abspath(entry) for entry in args.excludes)
+    uniq_excludes = {os.path.abspath(entry) for entry in args.excludes}
     args.excludes = list(uniq_excludes)
 
     # because shared codes for all tools, some common used methods are

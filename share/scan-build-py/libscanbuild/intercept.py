@@ -114,11 +114,11 @@ def setup_environment(args, destination):
         sys.platform) else build_libear(c_compiler, destination)
 
     environment = dict(os.environ)
-    environment.update({'INTERCEPT_BUILD_TARGET_DIR': destination})
+    environment['INTERCEPT_BUILD_TARGET_DIR'] = destination
 
     if not libear_path:
         logging.debug('intercept gonna use compiler wrappers')
-        environment.update(wrapper_environment(args))
+        environment |= wrapper_environment(args)
         environment.update({
             'CC': COMPILER_WRAPPER_CC,
             'CXX': COMPILER_WRAPPER_CXX
@@ -131,7 +131,7 @@ def setup_environment(args, destination):
         })
     else:
         logging.debug('intercept gonna preload libear on UNIX')
-        environment.update({'LD_PRELOAD': libear_path})
+        environment['LD_PRELOAD'] = libear_path
 
     return environment
 

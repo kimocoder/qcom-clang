@@ -47,8 +47,12 @@ def document(args):
         fragments = []
         try:
             if bug_counter.total:
-                fragments.append(bug_summary(args.output, bug_counter))
-                fragments.append(bug_report(args.output, prefix))
+                fragments.extend(
+                    (
+                        bug_summary(args.output, bug_counter),
+                        bug_report(args.output, prefix),
+                    )
+                )
             if crash_count:
                 fragments.append(crash_report(args.output, prefix))
             assemble_cover(args, prefix, fragments)
@@ -69,7 +73,7 @@ def assemble_cover(args, prefix, fragments):
     import socket
 
     if args.html_title is None:
-        args.html_title = os.path.basename(prefix) + ' - analyzer results'
+        args.html_title = f'{os.path.basename(prefix)} - analyzer results'
 
     with open(os.path.join(args.output, 'index.html'), 'w') as handle:
         indent = 0
@@ -83,7 +87,9 @@ def assemble_cover(args, prefix, fragments):
         |    <script type='text/javascript' src='selectable.js'></script>
         |  </head>""", indent).format(html_title=args.html_title))
         handle.write(comment('SUMMARYENDHEAD'))
-        handle.write(reindent("""
+        handle.write(
+            reindent(
+                """
         |  <body>
         |    <h1>{html_title}</h1>
         |    <table>
@@ -92,14 +98,18 @@ def assemble_cover(args, prefix, fragments):
         |      <tr><th>Command Line:</th><td>{cmd_args}</td></tr>
         |      <tr><th>Clang Version:</th><td>{clang_version}</td></tr>
         |      <tr><th>Date:</th><td>{date}</td></tr>
-        |    </table>""", indent).format(html_title=args.html_title,
-                                         user_name=getpass.getuser(),
-                                         host_name=socket.gethostname(),
-                                         current_dir=prefix,
-                                         cmd_args=' '.join(sys.argv),
-                                         clang_version=get_version(args.clang),
-                                         date=datetime.datetime.today(
-                                         ).strftime('%c')))
+        |    </table>""",
+                indent,
+            ).format(
+                html_title=args.html_title,
+                user_name=getpass.getuser(),
+                host_name=socket.gethostname(),
+                current_dir=prefix,
+                cmd_args=' '.join(sys.argv),
+                clang_version=get_version(args.clang),
+                date=datetime.datetime.now().strftime('%c'),
+            )
+        )
         for fragment in fragments:
             # copy the content of fragments
             with open(fragment, 'r') as input_handle:
@@ -321,15 +331,14 @@ def parse_bug_html(filename):
     }
 
     with open(filename) as handler:
-        for line in handler.readlines():
+        for line in handler:
             # do not read the file further
             if endsign.match(line):
                 break
             # search for the right lines
             for regex in patterns:
-                match = regex.match(line.strip())
-                if match:
-                    bug.update(match.groupdict())
+                if match := regex.match(line.strip()):
+                    bug |= match.groupdict()
                     break
 
     encode_value(bug, 'bug_line', int)
@@ -342,7 +351,7 @@ def parse_crash(filename):
     """ Parse out the crash information from the report file. """
 
     match = re.match(r'(.*)\.info\.txt', filename)
-    name = match.group(1) if match else None
+    name = match[1] if match else None
     with open(filename, mode='rb') as handler:
         # this is a workaround to fix windows read '\r\n' as new lines.
         lines = [line.decode().rstrip() for line in handler.readlines()]
@@ -350,8 +359,8 @@ def parse_crash(filename):
             'source': lines[0],
             'problem': lines[1],
             'file': name,
-            'info': name + '.info.txt',
-            'stderr': name + '.stderr.txt'
+            'info': f'{name}.info.txt',
+            'stderr': f'{name}.stderr.txt',
         }
 
 
@@ -380,7 +389,7 @@ def create_counters():
     def predicate(bug):
         bug_category = bug['bug_category']
         bug_type = bug['bug_type']
-        current_category = predicate.categories.get(bug_category, dict())
+        current_category = predicate.categories.get(bug_category, {})
         current_type = current_category.get(bug_type, {
             'bug_type': bug_type,
             'bug_type_class': category_type_name(bug),
@@ -392,7 +401,7 @@ def create_counters():
         predicate.total += 1
 
     predicate.total = 0
-    predicate.categories = dict()
+    predicate.categories = {}
     return predicate
 
 
@@ -444,7 +453,7 @@ def encode_value(container, key, encode):
 def chop(prefix, filename):
     """ Create 'filename' from '/prefix/filename' """
 
-    return filename if not len(prefix) else os.path.relpath(filename, prefix)
+    return os.path.relpath(filename, prefix) if len(prefix) else filename
 
 
 def escape(text):
@@ -463,20 +472,19 @@ def escape(text):
 def reindent(text, indent):
     """ Utility function to format html output and keep indentation. """
 
-    result = ''
-    for line in text.splitlines():
-        if len(line.strip()):
-            result += ' ' * indent + line.split('|')[1] + os.linesep
-    return result
+    return ''.join(
+        ' ' * indent + line.split('|')[1] + os.linesep
+        for line in text.splitlines()
+        if len(line.strip())
+    )
 
 
 def comment(name, opts=dict()):
     """ Utility function to format meta information as comment. """
 
-    attributes = ''
-    for key, value in opts.items():
-        attributes += ' {0}="{1}"'.format(key, value)
-
+    attributes = ''.join(
+        ' {0}="{1}"'.format(key, value) for key, value in opts.items()
+    )
     return '<!-- {0}{1} -->{2}'.format(name, attributes, os.linesep)
 
 
@@ -494,11 +502,7 @@ def commonprefix(files):
     :return: the longest path prefix that is a prefix of all files. """
     result = None
     for current in files:
-        if result is not None:
-            result = os.path.commonprefix([result, current])
-        else:
-            result = current
-
+        result = current if result is None else os.path.commonprefix([result, current])
     if result is None:
         return ''
     elif not os.path.isdir(result):

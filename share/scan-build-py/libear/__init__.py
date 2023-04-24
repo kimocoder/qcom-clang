@@ -54,7 +54,7 @@ def execute(cmd, *args, **kwargs):
     """ Make subprocess execution silent. """
 
     import subprocess
-    kwargs.update({'stdout': subprocess.PIPE, 'stderr': subprocess.STDOUT})
+    kwargs |= {'stdout': subprocess.PIPE, 'stderr': subprocess.STDOUT}
     return subprocess.check_call(cmd, *args, **kwargs)
 
 
@@ -81,7 +81,7 @@ class Toolset(object):
 
     def set_language_standard(self, standard):
         """ part of public interface """
-        self.c_flags.append('-std=' + standard)
+        self.c_flags.append(f'-std={standard}')
 
     def add_definitions(self, defines):
         """ part of public interface """
@@ -109,11 +109,11 @@ class DarwinToolset(Toolset):
         return []
 
     def shared_library_name(self, name):
-        return 'lib' + name + '.dylib'
+        return f'lib{name}.dylib'
 
     def shared_library_ld_flags(self, release, name):
         extra = ['-dead_strip'] if release else []
-        return extra + ['-dynamiclib', '-install_name', '@rpath/' + name]
+        return extra + ['-dynamiclib', '-install_name', f'@rpath/{name}']
 
 
 class UnixToolset(Toolset):
@@ -124,11 +124,11 @@ class UnixToolset(Toolset):
         return []
 
     def shared_library_name(self, name):
-        return 'lib' + name + '.so'
+        return f'lib{name}.so'
 
     def shared_library_ld_flags(self, release, name):
-        extra = [] if release else []
-        return extra + ['-shared', '-Wl,-soname,' + name]
+        extra = []
+        return extra + ['-shared', f'-Wl,-soname,{name}']
 
 
 class LinuxToolset(UnixToolset):
@@ -196,7 +196,7 @@ class Configure(object):
             pattern = re.compile(r'^#cmakedefine\s+(\S+)')
             m = pattern.match(line)
             if m:
-                key = m.group(1)
+                key = m[1]
                 if key not in definitions or not definitions[key]:
                     return '/* #undef {0} */{1}'.format(key, os.linesep)
                 else:
@@ -229,22 +229,38 @@ class SharedLibrary(object):
         self.src.append(source)
 
     def link_against(self, libraries):
-        self.lib.extend(['-l' + lib for lib in libraries])
+        self.lib.extend([f'-l{lib}' for lib in libraries])
 
     def build_release(self, directory):
         for src in self.src:
             logging.debug('Compiling %s', src)
             execute(
-                [self.ctx.compiler, '-c', os.path.join(self.ctx.src_dir, src),
-                 '-o', src + '.o'] + self.inc +
-                self.ctx.shared_library_c_flags(True),
-                cwd=directory)
+                (
+                    [
+                        self.ctx.compiler,
+                        '-c',
+                        os.path.join(self.ctx.src_dir, src),
+                        '-o',
+                        f'{src}.o',
+                    ]
+                    + self.inc
+                )
+                + self.ctx.shared_library_c_flags(True),
+                cwd=directory,
+            )
         logging.debug('Linking %s', self.name)
         execute(
-            [self.ctx.compiler] + [src + '.o' for src in self.src] +
-            ['-o', self.name] + self.lib +
-            self.ctx.shared_library_ld_flags(True, self.name),
-            cwd=directory)
+            (
+                (
+                    [self.ctx.compiler]
+                    + [f'{src}.o' for src in self.src]
+                    + ['-o', self.name]
+                )
+                + self.lib
+            )
+            + self.ctx.shared_library_ld_flags(True, self.name),
+            cwd=directory,
+        )
 
 
 def create_shared_library(name, toolset):

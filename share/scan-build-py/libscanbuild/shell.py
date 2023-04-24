@@ -47,7 +47,7 @@ def encode(command):
         table = {'\\': '\\\\', '"': '\\"'}
         escaped = ''.join([table.get(c, c) for c in word])
 
-        return '"' + escaped + '"' if needs_quote(word) else escaped
+        return f'"{escaped}"' if needs_quote(word) else escaped
 
     return " ".join([escape(arg) for arg in command])
 

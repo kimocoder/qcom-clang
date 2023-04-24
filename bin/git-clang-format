@@ -129,9 +129,8 @@ def main():
   if len(commits) > 1:
     if not opts.diff:
       die('--diff is required when two commits are given')
-  else:
-    if len(commits) > 2:
-      die('at most two commits allowed; %d given' % len(commits))
+  elif len(commits) > 2:
+    die('at most two commits allowed; %d given' % len(commits))
   changed_lines = compute_diff_and_extract_lines(commits, files)
   if opts.verbose >= 1:
     ignored_files = set(changed_lines)
@@ -141,11 +140,11 @@ def main():
     if ignored_files:
       print('Ignoring changes in the following files (wrong extension):')
       for filename in ignored_files:
-        print('    %s' % filename)
+        print(f'    {filename}')
     if changed_lines:
       print('Running clang-format on the following files:')
       for filename in changed_lines:
-        print('    %s' % filename)
+        print(f'    {filename}')
   if not changed_lines:
     print('no modified files to format')
     return
@@ -164,8 +163,8 @@ def main():
                                                  binary=opts.binary,
                                                  style=opts.style)
   if opts.verbose >= 1:
-    print('old tree: %s' % old_tree)
-    print('new tree: %s' % new_tree)
+    print(f'old tree: {old_tree}')
+    print(f'new tree: {new_tree}')
   if old_tree == new_tree:
     if opts.verbose >= 0:
       print('clang-format did not modify any files')
@@ -177,7 +176,7 @@ def main():
     if (opts.verbose >= 0 and not opts.patch) or opts.verbose >= 1:
       print('changed files:')
       for filename in changed_files:
-        print('    %s' % filename)
+        print(f'    {filename}')
 
 
 def load_git_config(non_string_options=None):
@@ -209,23 +208,18 @@ def interpret_args(args, dash_dash, default_commit):
   from left to right if they are commits or files.  If commits are not given,
   a list with `default_commit` is used."""
   if dash_dash:
-    if len(args) == 0:
-      commits = [default_commit]
-    else:
-      commits = args
+    commits = [default_commit] if len(args) == 0 else args
     for commit in commits:
       object_type = get_object_type(commit)
       if object_type not in ('commit', 'tag'):
         if object_type is None:
-          die("'%s' is not a commit" % commit)
+          die(f"'{commit}' is not a commit")
         else:
-          die("'%s' is a %s, but a commit was expected" % (commit, object_type))
+          die(f"'{commit}' is a {object_type}, but a commit was expected")
     files = dash_dash[1:]
   elif args:
     commits = []
-    while args:
-      if not disambiguate_revision(args[0]):
-        break
+    while args and disambiguate_revision(args[0]):
       commits.append(args.pop(0))
     if not commits:
       commits = [default_commit]
@@ -246,8 +240,7 @@ def disambiguate_revision(value):
     return False
   if object_type in ('commit', 'tag'):
     return True
-  die('`%s` is a %s, but a commit or filename was expected' %
-      (value, object_type))
+  die(f'`{value}` is a {object_type}, but a commit or filename was expected')
 
 
 def get_object_type(value):
@@ -256,9 +249,7 @@ def get_object_type(value):
   cmd = ['git', 'cat-file', '-t', value]
   p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
   stdout, stderr = p.communicate()
-  if p.returncode != 0:
-    return None
-  return convert_string(stdout.strip())
+  return None if p.returncode != 0 else convert_string(stdout.strip())
 
 
 def compute_diff_and_extract_lines(commits, files):
@@ -280,9 +271,7 @@ def compute_diff(commits, files):
   differences between the working directory and the first commit if a single
   one was specified, or the difference between both specified commits, filtered
   on `files` (if non-empty).  Zero context lines are used in the patch."""
-  git_tool = 'diff-index'
-  if len(commits) > 1:
-    git_tool = 'diff-tree'
+  git_tool = 'diff-tree' if len(commits) > 1 else 'diff-index'
   cmd = ['git', git_tool, '-p', '-U0'] + commits + ['--']
   cmd.extend(files)
   p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -302,16 +291,14 @@ def extract_lines(patch_file):
   matches = {}
   for line in patch_file:
     line = convert_string(line)
-    match = re.search(r'^\+\+\+\ [^/]+/(.*)', line)
-    if match:
-      filename = match.group(1).rstrip('\r\n')
-    match = re.search(r'^@@ -[0-9,]+ \+(\d+)(,(\d+))?', line)
-    if match:
-      start_line = int(match.group(1))
+    if match := re.search(r'^\+\+\+\ [^/]+/(.*)', line):
+      filename = match[1].rstrip('\r\n')
+    if match := re.search(r'^@@ -[0-9,]+ \+(\d+)(,(\d+))?', line):
       line_count = 1
-      if match.group(3):
-        line_count = int(match.group(3))
+      if match[3]:
+        line_count = int(match[3])
       if line_count > 0:
+        start_line = int(match[1])
         matches.setdefault(filename, []).append(Range(start_line, line_count))
   return matches
 
@@ -353,12 +340,16 @@ def run_clang_format_and_save_to_tree(changed_lines, revision=None,
           return container.iteritems() # Python 2
       except AttributeError:
           return container.items() # Python 3
+
   def index_info_generator():
     for filename, line_ranges in iteritems(changed_lines):
       if revision:
-        git_metadata_cmd = ['git', 'ls-tree',
-                            '%s:%s' % (revision, os.path.dirname(filename)),
-                            os.path.basename(filename)]
+        git_metadata_cmd = [
+            'git',
+            'ls-tree',
+            f'{revision}:{os.path.dirname(filename)}',
+            os.path.basename(filename),
+        ]
         git_metadata = subprocess.Popen(git_metadata_cmd, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE)
         stdout = git_metadata.communicate()[0]
@@ -367,12 +358,13 @@ def run_clang_format_and_save_to_tree(changed_lines, revision=None,
         mode = oct(os.stat(filename).st_mode)
       # Adjust python3 octal format so that it matches what git expects
       if mode.startswith('0o'):
-          mode = '0' + mode[2:]
+        mode = f'0{mode[2:]}'
       blob_id = clang_format_to_blob(filename, line_ranges,
                                      revision=revision,
                                      binary=binary,
                                      style=style)
       yield '%s %s\t%s' % (mode, blob_id, filename)
+
   return create_tree(index_info_generator(), '--index-info')
 
 
@@ -391,9 +383,8 @@ def create_tree(input_lines, mode):
       p.stdin.write(to_bytes('%s\0' % line))
     p.stdin.close()
     if p.wait() != 0:
-      die('`%s` failed' % ' '.join(cmd))
-    tree_id = run('git', 'write-tree')
-    return tree_id
+      die(f"`{' '.join(cmd)}` failed")
+    return run('git', 'write-tree')
 
 
 def clang_format_to_blob(filename, line_ranges, revision=None,
@@ -406,13 +397,14 @@ def clang_format_to_blob(filename, line_ranges, revision=None,
   Returns the object ID (SHA-1) of the created blob."""
   clang_format_cmd = [binary]
   if style:
-    clang_format_cmd.extend(['-style='+style])
+    clang_format_cmd.extend([f'-style={style}'])
   clang_format_cmd.extend([
-      '-lines=%s:%s' % (start_line, start_line+line_count-1)
-      for start_line, line_count in line_ranges])
+      f'-lines={start_line}:{start_line + line_count - 1}'
+      for start_line, line_count in line_ranges
+  ])
   if revision:
-    clang_format_cmd.extend(['-assume-filename='+filename])
-    git_show_cmd = ['git', 'cat-file', 'blob', '%s:%s' % (revision, filename)]
+    clang_format_cmd.extend([f'-assume-filename={filename}'])
+    git_show_cmd = ['git', 'cat-file', 'blob', f'{revision}:{filename}']
     git_show = subprocess.Popen(git_show_cmd, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE)
     git_show.stdin.close()
@@ -428,21 +420,21 @@ def clang_format_to_blob(filename, line_ranges, revision=None,
       clang_format_stdin = clang_format.stdin
   except OSError as e:
     if e.errno == errno.ENOENT:
-      die('cannot find executable "%s"' % binary)
+      die(f'cannot find executable "{binary}"')
     else:
       raise
   clang_format_stdin.close()
-  hash_object_cmd = ['git', 'hash-object', '-w', '--path='+filename, '--stdin']
+  hash_object_cmd = ['git', 'hash-object', '-w', f'--path={filename}', '--stdin']
   hash_object = subprocess.Popen(hash_object_cmd, stdin=clang_format.stdout,
                                  stdout=subprocess.PIPE)
   clang_format.stdout.close()
   stdout = hash_object.communicate()[0]
   if hash_object.returncode != 0:
-    die('`%s` failed' % ' '.join(hash_object_cmd))
+    die(f"`{' '.join(hash_object_cmd)}` failed")
   if clang_format.wait() != 0:
-    die('`%s` failed' % ' '.join(clang_format_cmd))
+    die(f"`{' '.join(clang_format_cmd)}` failed")
   if git_show and git_show.wait() != 0:
-    die('`%s` failed' % ' '.join(git_show_cmd))
+    die(f"`{' '.join(git_show_cmd)}` failed")
   return convert_string(stdout).rstrip('\r\n')
 
 
@@ -472,7 +464,7 @@ def create_temporary_index(tree=None):
   path = os.path.join(gitdir, temp_index_basename)
   if tree is None:
     tree = '--empty'
-  run('git', 'read-tree', '--index-output='+path, tree)
+  run('git', 'read-tree', f'--index-output={path}', tree)
   return path
 
 
@@ -498,8 +490,8 @@ def apply_changes(old_tree, new_tree, force=False, patch_mode=False):
                       '--name-only', old_tree,
                       new_tree).rstrip('\0').split('\0')
   if not force:
-    unstaged_files = run('git', 'diff-files', '--name-status', *changed_files)
-    if unstaged_files:
+    if unstaged_files := run('git', 'diff-files', '--name-status',
+                             *changed_files):
       print('The following files would be modified but '
                 'have unstaged changes:', file=sys.stderr)
       print(unstaged_files, file=sys.stderr)
@@ -526,7 +518,7 @@ def run(*args, **kwargs):
   verbose = kwargs.pop('verbose', True)
   strip = kwargs.pop('strip', True)
   for name in kwargs:
-    raise TypeError("run() got an unexpected keyword argument '%s'" % name)
+    raise TypeError(f"run() got an unexpected keyword argument '{name}'")
   p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        stdin=subprocess.PIPE)
   stdout, stderr = p.communicate(input=stdin)
@@ -537,13 +529,13 @@ def run(*args, **kwargs):
   if p.returncode == 0:
     if stderr:
       if verbose:
-        print('`%s` printed to stderr:' % ' '.join(args), file=sys.stderr)
+        print(f"`{' '.join(args)}` printed to stderr:", file=sys.stderr)
       print(stderr.rstrip(), file=sys.stderr)
     if strip:
       stdout = stdout.rstrip('\r\n')
     return stdout
   if verbose:
-    print('`%s` returned %s' % (' '.join(args), p.returncode), file=sys.stderr)
+    print(f"`{' '.join(args)}` returned {p.returncode}", file=sys.stderr)
   if stderr:
     print(stderr.rstrip(), file=sys.stderr)
   sys.exit(2)
@@ -556,9 +548,7 @@ def die(message):
 
 def to_bytes(str_input):
     # Encode to UTF-8 to get binary data.
-    if isinstance(str_input, bytes):
-        return str_input
-    return str_input.encode('utf-8')
+  return str_input if isinstance(str_input, bytes) else str_input.encode('utf-8')
 
 
 def to_string(bytes_input):
@@ -568,12 +558,10 @@ def to_string(bytes_input):
 
 
 def convert_string(bytes_input):
-    try:
-        return to_string(bytes_input.decode('utf-8'))
-    except AttributeError: # 'str' object has no attribute 'decode'.
-        return str(bytes_input)
-    except UnicodeError:
-        return str(bytes_input)
+  try:
+    return to_string(bytes_input.decode('utf-8'))
+  except (AttributeError, UnicodeError): # 'str' object has no attribute 'decode'.
+    return str(bytes_input)
 
 if __name__ == '__main__':
   main()

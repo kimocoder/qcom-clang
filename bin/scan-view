@@ -95,10 +95,19 @@ def main():
                                                  "results viewer.")
     parser.add_argument("root", metavar="<results directory>", type=str)
     parser.add_argument(
-        '--host', dest="host", default=kDefaultHost, type=str,
-        help="Host interface to listen on. (default=%s)" % kDefaultHost)
-    parser.add_argument('--port', dest="port", default=None, type=int,
-                        help="Port to listen on. (default=%s)" % kDefaultPort)
+        '--host',
+        dest="host",
+        default=kDefaultHost,
+        type=str,
+        help=f"Host interface to listen on. (default={kDefaultHost})",
+    )
+    parser.add_argument(
+        '--port',
+        dest="port",
+        default=None,
+        type=int,
+        help=f"Port to listen on. (default={kDefaultPort})",
+    )
     parser.add_argument("--debug", dest="debug", default=0,
                         action="count",
                         help="Print additional debugging information.")

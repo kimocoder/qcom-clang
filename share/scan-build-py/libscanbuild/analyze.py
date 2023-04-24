@@ -137,13 +137,11 @@ def create_global_ctu_function_map(func_map_lines):
         else:
             mangled_to_asts[mangled_name].add(ast_file)
 
-    mangled_ast_pairs = []
-
-    for mangled_name, ast_files in mangled_to_asts.items():
-        if len(ast_files) == 1:
-            mangled_ast_pairs.append((mangled_name, ast_files.pop()))
-
-    return mangled_ast_pairs
+    return [
+        (mangled_name, ast_files.pop())
+        for mangled_name, ast_files in mangled_to_asts.items()
+        if len(ast_files) == 1
+    ]
 
 
 def merge_ctu_func_maps(ctudir):
@@ -162,8 +160,7 @@ def merge_ctu_func_maps(ctudir):
         files = glob.glob(os.path.join(fnmap_dir, '*'))
         for filename in files:
             with open(filename, 'r') as in_file:
-                for line in in_file:
-                    yield line
+                yield from in_file
 
     def write_global_map(ctudir, arch, mangled_ast_pairs):
         """ Write (mangled function name, ast file) pairs into final file. """
@@ -194,8 +191,7 @@ def run_analyzer_parallel(args):
 
     def exclude(filename):
         """ Return true when any excluded directory prefix the filename. """
-        return any(re.match(r'^' + directory, filename)
-                   for directory in args.excludes)
+        return any(re.match(f'^{directory}', filename) for directory in args.excludes)
 
     consts = {
         'clang': args.clang,
@@ -249,7 +245,7 @@ def setup_environment(args):
     """ Set up environment for build command to interpose compiler wrapper. """
 
     environment = dict(os.environ)
-    environment.update(wrapper_environment(args))
+    environment |= wrapper_environment(args)
     environment.update({
         'CC': COMPILER_WRAPPER_CC,
         'CXX': COMPILER_WRAPPER_CXX,
@@ -297,7 +293,7 @@ def analyze_compiler_wrapper_impl(result, execution):
     }
     # call static analyzer against the compilation
     for source in compilation.files:
-        parameters.update({'file': source})
+        parameters['file'] = source
         logging.debug('analyzer parameters %s', parameters)
         current = run(parameters)
         # display error message from the static analyzer
@@ -328,11 +324,10 @@ def report_directory(hint, keep):
         if os.listdir(name):
             msg = "Run 'scan-view %s' to examine bug reports."
             keep = True
+        elif keep:
+            msg = "Report directory '%s' contains no report, but kept."
         else:
-            if keep:
-                msg = "Report directory '%s' contains no report, but kept."
-            else:
-                msg = "Removing directory '%s' because it contains no report."
+            msg = "Removing directory '%s' because it contains no report."
         logging.warning(msg, name)
 
         if not keep:
@@ -463,9 +458,9 @@ def report_failure(opts):
     error = 'crash' if opts['exit_code'] < 0 else 'other_error'
     # Create preprocessor output file name. (This is blindly following the
     # Perl implementation.)
-    (handle, name) = tempfile.mkstemp(suffix=extension(),
-                                      prefix='clang_' + error + '_',
-                                      dir=destination())
+    (handle, name) = tempfile.mkstemp(
+        suffix=extension(), prefix=f'clang_{error}_', dir=destination()
+    )
     os.close(handle)
     # Execute Clang again, but run the syntax check only.
     cwd = opts['directory']
@@ -474,7 +469,7 @@ def report_failure(opts):
          ] + opts['flags'] + [opts['file'], '-o', name], cwd)
     run_command(cmd, cwd=cwd)
     # write general information about the crash
-    with open(name + '.info.txt', 'w') as handle:
+    with open(f'{name}.info.txt', 'w') as handle:
         handle.write(opts['file'] + os.linesep)
         handle.write(error.title().replace('_', ' ') + os.linesep)
         handle.write(' '.join(cmd) + os.linesep)
@@ -482,7 +477,7 @@ def report_failure(opts):
         handle.write(get_version(opts['clang']))
         handle.close()
     # write the captured output too
-    with open(name + '.stderr.txt', 'w') as handle:
+    with open(f'{name}.stderr.txt', 'w') as handle:
         handle.writelines(opts['error_output'])
         handle.close()
 
@@ -530,14 +525,14 @@ def func_map_list_src_to_ast(func_src_list, triple_arch):
     func_ast_list = []
     for fn_src_txt in func_src_list:
         dpos = fn_src_txt.find(" ")
-        mangled_name = fn_src_txt[0:dpos]
+        mangled_name = fn_src_txt[:dpos]
         path = fn_src_txt[dpos + 1:]
         # Normalize path on windows as well
         path = os.path.splitdrive(path)[1]
         # Make relative path out of absolute
         path = path[1:] if path[0] == os.sep else path
-        ast_path = os.path.join(triple_arch,"ast", path + ".ast")
-        func_ast_list.append(mangled_name + " " + ast_path)
+        ast_path = os.path.join(triple_arch, "ast", f"{path}.ast")
+        func_ast_list.append(f"{mangled_name} {ast_path}")
     return func_ast_list
 
 
@@ -555,10 +550,8 @@ def ctu_collect_phase(opts):
         ast_path = os.path.abspath(ast_joined_path)
         ast_dir = os.path.dirname(ast_path)
         if not os.path.isdir(ast_dir):
-            try:
+            with contextlib.suppress(OSError):
                 os.makedirs(ast_dir)
-            except OSError:
-                pass
         ast_command = [opts['clang'], '-emit-ast']
         ast_command.extend(args)
         ast_command.append('-w')
@@ -582,10 +575,8 @@ def ctu_collect_phase(opts):
         extern_fns_map_folder = os.path.join(opts['ctu'].dir, triple_arch,
                                              CTU_TEMP_FNMAP_FOLDER)
         if not os.path.isdir(extern_fns_map_folder):
-            try:
+            with contextlib.suppress(OSError):
                 os.makedirs(extern_fns_map_folder)
-            except OSError:
-                pass
         if func_ast_list:
             with tempfile.NamedTemporaryFile(mode='w',
                                              dir=extern_fns_map_folder,
@@ -615,18 +606,20 @@ def dispatch_ctu(opts, continuation=run_analyzer):
 
     if ctu_config.collect or ctu_config.analyze:
         assert ctu_config.collect != ctu_config.analyze
-        if ctu_config.collect:
-            return ctu_collect_phase(opts)
-        if ctu_config.analyze:
-            cwd = opts['directory']
-            cmd = [opts['clang'], '--analyze'] + opts['direct_args'] \
-                + opts['flags'] + [opts['file']]
-            triarch = get_triple_arch(cmd, cwd)
-            ctu_options = ['ctu-dir=' + os.path.join(ctu_config.dir),
-                           'reanalyze-ctu-visited=true']
-            analyzer_options = prefix_with('-analyzer-config', ctu_options)
-            direct_options = prefix_with('-Xanalyzer', analyzer_options)
-            opts['direct_args'].extend(direct_options)
+    if ctu_config.collect:
+        return ctu_collect_phase(opts)
+    if ctu_config.analyze:
+        cwd = opts['directory']
+        cmd = [opts['clang'], '--analyze'] + opts['direct_args'] \
+            + opts['flags'] + [opts['file']]
+        triarch = get_triple_arch(cmd, cwd)
+        ctu_options = [
+            f'ctu-dir={os.path.join(ctu_config.dir)}',
+            'reanalyze-ctu-visited=true',
+        ]
+        analyzer_options = prefix_with('-analyzer-config', ctu_options)
+        direct_options = prefix_with('-Xanalyzer', analyzer_options)
+        opts['direct_args'].extend(direct_options)
 
     return continuation(opts)
 
@@ -678,11 +671,8 @@ def arch_check(opts, continuation=language_check):
 
     disabled = frozenset({'ppc', 'ppc64'})
 
-    received_list = opts.pop('arch_list')
-    if received_list:
-        # filter out disabled architectures and -arch switches
-        filtered_list = [a for a in received_list if a not in disabled]
-        if filtered_list:
+    if received_list := opts.pop('arch_list'):
+        if filtered_list := [a for a in received_list if a not in disabled]:
             # There should be only one arch given (or the same multiple
             # times). If there are multiple arch are given and are not
             # the same, those should not change the pre-processing step.
@@ -743,23 +733,15 @@ def classify_parameters(command):
         # take arch flags into a separate basket
         if arg == '-arch':
             result['arch_list'].append(next(args))
-        # take language
         elif arg == '-x':
             result['language'] = next(args)
-        # parameters which looks source file are not flags
         elif re.match(r'^[^-].+', arg) and classify_source(arg):
             pass
-        # ignore some flags
         elif arg in IGNORED_FLAGS:
             count = IGNORED_FLAGS[arg]
             for _ in range(count):
                 next(args)
-        # we don't care about extra warnings, but we should suppress ones
-        # that we don't want to see.
-        elif re.match(r'^-W.+', arg) and not re.match(r'^-Wno-.+', arg):
-            pass
-        # and consider everything else as compilation flag.
-        else:
+        elif not re.match(r'^-W.+', arg) or re.match(r'^-Wno-.+', arg):
             result['flags'].append(arg)
 
     return result
